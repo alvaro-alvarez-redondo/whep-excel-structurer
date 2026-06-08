@@ -56,6 +56,8 @@ def _normalize_original_country_match_value(value: str) -> str:
 
 CountryLabelPattern = tuple[str, str, str]
 CountryLabelPatterns = dict[str, tuple[CountryLabelPattern, ...]]
+RowReconstructionPattern = tuple[str, str, str, str, str]
+RowReconstructionPatterns = dict[str, tuple[RowReconstructionPattern, ...]]
 
 
 @dataclass(frozen=True)
@@ -70,7 +72,7 @@ class CountryLabelPatternConfig:
     """
 
     country_patterns: CountryLabelPatterns
-    row_reconstruction_patterns: CountryLabelPatterns
+    row_reconstruction_patterns: RowReconstructionPatterns
 
     def get(
         self, continent_name: str, default: tuple[CountryLabelPattern, ...] = ()
@@ -198,26 +200,68 @@ def _build_country_label_patterns(
     return {key: tuple(value) for key, value in grouped.items()}
 
 
+def _build_row_reconstruction_patterns(
+    letter_rows: tuple[tuple[object, object], ...],
+    row_reconstruction_rows: tuple[tuple[object, object, object, object], ...],
+) -> RowReconstructionPatterns:
+    letter_substitutions = _normalize_letter_substitutions(letter_rows)
+    grouped: dict[str, list[RowReconstructionPattern]] = {}
+
+    for (
+        continent,
+        previous_input,
+        current_input,
+        correct_output,
+    ) in row_reconstruction_rows:
+        if (
+            pd.isna(continent)
+            or pd.isna(previous_input)
+            or pd.isna(current_input)
+            or pd.isna(correct_output)
+        ):
+            continue
+        continent_key = _normalize_country_label_series(pd.Series([continent])).iat[0]
+        if not continent_key:
+            continue
+        previous_text = str(previous_input)
+        current_text = str(current_input)
+        grouped.setdefault(continent_key, []).append(
+            (
+                _pattern_from_canonical_label(previous_text, letter_substitutions),
+                _pattern_from_canonical_label(current_text, letter_substitutions),
+                str(correct_output),
+                _country_label_match_key(previous_text),
+                _country_label_match_key(current_text),
+            )
+        )
+
+    return {key: tuple(value) for key, value in grouped.items()}
+
+
 def _default_country_label_patterns() -> CountryLabelPatternConfig:
     return CountryLabelPatternConfig(
         country_patterns=_build_country_label_patterns(
             DEFAULT_OCR_LETTER_SUBSTITUTIONS,
             DEFAULT_COUNTRY_LABEL_RULES,
         ),
-        row_reconstruction_patterns=_build_country_label_patterns(
+        row_reconstruction_patterns=_build_row_reconstruction_patterns(
             DEFAULT_OCR_LETTER_SUBSTITUTIONS,
             DEFAULT_ROW_RECONSTRUCTION_RULES,
         ),
     )
 
 
+def _enabled_rows(df: pd.DataFrame) -> pd.DataFrame:
+    if "enabled" not in df.columns:
+        return df
+    enabled = df["enabled"].fillna(True).astype(bool)
+    return df.loc[enabled]
+
+
 def _enabled_pattern_rows(
     df: pd.DataFrame, input_column: str
 ) -> tuple[tuple[object, object, object], ...]:
-    if "enabled" in df.columns:
-        enabled = df["enabled"].fillna(True).astype(bool)
-        df = df.loc[enabled]
-
+    df = _enabled_rows(df)
     if df.empty:
         return ()
 
@@ -228,15 +272,37 @@ def _enabled_pattern_rows(
     )
 
 
+def _enabled_row_reconstruction_rows(
+    df: pd.DataFrame,
+) -> tuple[tuple[object, object, object, object], ...]:
+    df = _enabled_rows(df)
+    if df.empty:
+        return ()
+
+    return tuple(
+        df[
+            ["continent", "previous_input", "current_input", "correct_output"]
+        ].itertuples(index=False, name=None)
+    )
+
+
 def _country_label_patterns_from_excel(path: Path) -> CountryLabelPatternConfig:
     workbook = pd.ExcelFile(path)
     letter_df = pd.read_excel(workbook, sheet_name="letter_dictionary")
     country_df = pd.read_excel(workbook, sheet_name="country_patterns")
     if "row_reconstruction" in workbook.sheet_names:
-        row_reconstruction_df = pd.read_excel(workbook, sheet_name="row_reconstruction")
+        row_reconstruction_df = pd.read_excel(
+            workbook, sheet_name="row_reconstruction"
+        )
     else:
         row_reconstruction_df = pd.DataFrame(
-            columns=["continent", "reconstructed_input", "correct_output", "enabled"]
+            columns=[
+                "continent",
+                "previous_input",
+                "current_input",
+                "correct_output",
+                "enabled",
+            ]
         )
 
     letter_rows = tuple(
@@ -244,12 +310,10 @@ def _country_label_patterns_from_excel(path: Path) -> CountryLabelPatternConfig:
     )
 
     country_rows = _enabled_pattern_rows(country_df, "canonical_input")
-    row_reconstruction_rows = _enabled_pattern_rows(
-        row_reconstruction_df, "reconstructed_input"
-    )
+    row_reconstruction_rows = _enabled_row_reconstruction_rows(row_reconstruction_df)
     return CountryLabelPatternConfig(
         country_patterns=_build_country_label_patterns(letter_rows, country_rows),
-        row_reconstruction_patterns=_build_country_label_patterns(
+        row_reconstruction_patterns=_build_row_reconstruction_patterns(
             letter_rows, row_reconstruction_rows
         ),
     )
@@ -289,8 +353,8 @@ def _country_label_patterns_description_rows() -> tuple[dict[str, str], ...]:
             "sheet": "country_patterns",
             "column": "canonical_input",
             "description": (
-                "Country label, alias, misspelling, OCR artifact, or full "
-                "previous-row plus current-row reconstruction to recognize."
+                "Current-row country label, alias, misspelling, or OCR artifact "
+                "to recognize."
             ),
             "example": "united kingdom",
         },
@@ -317,12 +381,21 @@ def _country_label_patterns_description_rows() -> tuple[dict[str, str], ...]:
         },
         {
             "sheet": "row_reconstruction",
-            "column": "reconstructed_input",
+            "column": "previous_input",
             "description": (
-                "Full text expected after concatenating the immediately previous "
-                "country row with the current country row."
+                "Country text expected in the immediately previous row before "
+                "a reconstruction is allowed."
             ),
             "example": "united kingdom",
+        },
+        {
+            "sheet": "row_reconstruction",
+            "column": "current_input",
+            "description": (
+                "Country text expected in the current row before this row is "
+                "rewritten to correct_output."
+            ),
+            "example": "dependent territories",
         },
         {
             "sheet": "row_reconstruction",
@@ -353,7 +426,7 @@ def write_country_label_patterns_preset(path: Path) -> None:
     country_df["enabled"] = True
     row_reconstruction_df = pd.DataFrame(
         DEFAULT_ROW_RECONSTRUCTION_RULES,
-        columns=["continent", "reconstructed_input", "correct_output"],
+        columns=["continent", "previous_input", "current_input", "correct_output"],
     )
     row_reconstruction_df["enabled"] = True
     description_df = pd.DataFrame(_country_label_patterns_description_rows())
@@ -402,7 +475,7 @@ DEFAULT_COUNTRY_LABEL_RULES = (
     ("europe", "soviet", "Germany Soviet Zone"),
     ("europe", "berlin", "Germany Berlin"),
 )
-DEFAULT_ROW_RECONSTRUCTION_RULES: tuple[tuple[str, str, str], ...] = ()
+DEFAULT_ROW_RECONSTRUCTION_RULES: tuple[tuple[str, str, str, str], ...] = ()
 
 
 def _get_fast_engine() -> str | None:
@@ -751,13 +824,66 @@ def _matched_country_labels(
     return labels
 
 
-def _previous_current_country_text(country: pd.Series) -> pd.Series:
+def _country_text_matches_pattern(
+    country_text: pd.Series, regex: str, match_key: str
+) -> pd.Series:
+    regex_matches = _normalize_country_label_series(country_text).str.fullmatch(
+        regex, na=False
+    )
+    missing_mask = ~regex_matches
+    if missing_mask.any():
+        candidate_keys = country_text.loc[missing_mask].map(_country_label_match_key)
+        fuzzy_matches = candidate_keys.map(
+            lambda candidate_key: _is_fuzzy_country_label_match(
+                candidate_key, match_key
+            )
+        )
+        regex_matches.loc[missing_mask] = fuzzy_matches
+    return regex_matches
+
+
+def _matched_row_reconstruction_labels(
+    previous_country_text: pd.Series,
+    current_country_text: pd.Series,
+    patterns: tuple[RowReconstructionPattern, ...],
+) -> pd.Series:
+    """Return labels when both previous-row and current-row patterns match."""
+    labels = pd.Series(pd.NA, index=current_country_text.index, dtype="object")
+    if not patterns:
+        return labels
+
+    for (
+        previous_regex,
+        current_regex,
+        label,
+        previous_match_key,
+        current_match_key,
+    ) in patterns:
+        missing_mask = labels.isna()
+        if not missing_mask.any():
+            break
+        previous_matches = _country_text_matches_pattern(
+            previous_country_text.loc[missing_mask],
+            previous_regex,
+            previous_match_key,
+        )
+        current_matches = _country_text_matches_pattern(
+            current_country_text.loc[missing_mask],
+            current_regex,
+            current_match_key,
+        )
+        matched_index = previous_matches.index[previous_matches & current_matches]
+        labels.loc[matched_index] = label
+
+    return labels
+
+
+def _previous_and_current_country_text(
+    country: pd.Series,
+) -> tuple[pd.Series, pd.Series]:
     current = country.where(country.notna(), "").astype(str).str.strip()
     previous = current.shift(1).fillna("").astype(str).str.strip()
-    combined = (
-        (previous + " " + current).str.replace(r"\s+", " ", regex=True).str.strip()
-    )
-    return combined
+    return previous, current
 
 
 def _prefix_countries_by_patterns(
@@ -765,7 +891,7 @@ def _prefix_countries_by_patterns(
     *,
     continent_name: str,
     patterns: tuple[tuple[str, ...], ...],
-    row_reconstruction_patterns: tuple[tuple[str, ...], ...] = (),
+    row_reconstruction_patterns: tuple[RowReconstructionPattern, ...] = (),
 ) -> pd.DataFrame:
     if "country" not in df.columns or "continent" not in df.columns:
         return df
@@ -777,8 +903,11 @@ def _prefix_countries_by_patterns(
 
     labels = _matched_country_labels(df["country"], patterns)
     if row_reconstruction_patterns:
-        combined_labels = _matched_country_labels(
-            _previous_current_country_text(df["country"]), row_reconstruction_patterns
+        previous_country, current_country = _previous_and_current_country_text(
+            df["country"]
+        )
+        combined_labels = _matched_row_reconstruction_labels(
+            previous_country, current_country, row_reconstruction_patterns
         )
         labels = labels.where(labels.notna(), combined_labels)
     mask = continent_mask & labels.notna()

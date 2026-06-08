@@ -153,7 +153,8 @@ def test_missing_country_label_patterns_excel_generates_preset(tmp_path: Path) -
     ]
     assert list(row_reconstruction_df.columns) == [
         "continent",
-        "reconstructed_input",
+        "previous_input",
+        "current_input",
         "correct_output",
         "enabled",
     ]
@@ -191,7 +192,8 @@ def test_country_label_patterns_reconstruct_split_previous_row_fragment(
         pd.DataFrame(
             {
                 "continent": ["EUROPE"],
-                "reconstructed_input": ["united kingdom"],
+                "previous_input": ["united"],
+                "current_input": ["kingdom"],
                 "correct_output": ["United Kingdom"],
                 "enabled": [True],
             }
@@ -209,6 +211,61 @@ def test_country_label_patterns_reconstruct_split_previous_row_fragment(
 
     assert result.loc[0, "country"] == "UNITED"
     assert result.loc[1, "country"] == "United Kingdom"
+
+
+def test_country_label_patterns_disambiguate_duplicate_current_fragments(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "country_label_patterns.xlsx"
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "canonical_char": ["a", "e", "i", "o", "u"],
+                "variants": ["aeou", "aeou", "i,l,1,|", "aeou0", "aeou"],
+            }
+        ).to_excel(writer, sheet_name="letter_dictionary", index=False)
+        pd.DataFrame(
+            {
+                "continent": [],
+                "canonical_input": [],
+                "correct_output": [],
+                "enabled": [],
+            }
+        ).to_excel(writer, sheet_name="country_patterns", index=False)
+        pd.DataFrame(
+            {
+                "continent": ["AMERICA", "AMERICA"],
+                "previous_input": ["united kingdom", "united states"],
+                "current_input": ["dependent territories", "dependent territories"],
+                "correct_output": [
+                    "United Kingdom Dependent Territories",
+                    "United States Dependent Territories",
+                ],
+                "enabled": [True, True],
+            }
+        ).to_excel(writer, sheet_name="row_reconstruction", index=False)
+
+    patterns = load_country_label_patterns(str(path))
+    df = pd.DataFrame(
+        {
+            "continent": ["AMERICA", "AMERICA", "AMERICA", "AMERICA"],
+            "country": [
+                "UNITED KINGD0M",
+                "Dependent Territories",
+                "United States",
+                "Dependent Territ0ries",
+            ],
+        }
+    )
+
+    result = apply_country_label_patterns(df, patterns)
+
+    assert result["country"].to_list() == [
+        "UNITED KINGD0M",
+        "United Kingdom Dependent Territories",
+        "United States",
+        "United States Dependent Territories",
+    ]
 
 
 def test_country_label_patterns_handle_formatting_and_ocr_variations_from_excel(
