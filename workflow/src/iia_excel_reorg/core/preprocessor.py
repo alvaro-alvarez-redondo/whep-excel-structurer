@@ -253,29 +253,90 @@ def _country_label_patterns_description_rows() -> tuple[dict[str, str], ...]:
         },
         {
             "sheet": "matching_behavior",
-            "column": "previous-row reconstruction",
+            "column": "behavior",
+            "description": "Short name for a generic matching feature documented in that sheet.",
+            "example": "previous-row reconstruction",
+        },
+        {
+            "sheet": "matching_behavior",
+            "column": "description",
+            "description": "How that generic matching feature affects country_patterns rows.",
+            "example": "Configure the full reconstructed text in canonical_input.",
+        },
+        {
+            "sheet": "matching_behavior",
+            "column": "configuration_guidance",
+            "description": "What to edit in country_patterns or letter_dictionary for this behavior.",
+            "example": "Add one country_patterns row per alias or OCR artifact.",
+        },
+        {
+            "sheet": "matching_behavior",
+            "column": "example",
+            "description": "Concrete OCR/source text example for the behavior.",
+            "example": "United + Kingdorn -> United Kingdom",
+        },
+    )
+
+
+def _country_label_patterns_matching_behavior_rows() -> tuple[dict[str, str], ...]:
+    return (
+        {
+            "behavior": "current-row pattern match",
             "description": (
-                "The pipeline first matches the current country cell, then "
-                "matches nearest previous row plus current row. Configure the "
-                "full reconstructed text in canonical_input."
+                "The current country cell is matched against generated patterns "
+                "from country_patterns.canonical_input."
+            ),
+            "configuration_guidance": (
+                "Add aliases, common misspellings, and OCR artifacts as separate "
+                "country_patterns rows pointing to the same correct_output."
+            ),
+            "example": "Bizone -> Germany Bizone",
+        },
+        {
+            "behavior": "previous-row reconstruction",
+            "description": (
+                "If the current row does not match, the nearest previous country "
+                "row is concatenated with the current row and matched."
+            ),
+            "configuration_guidance": (
+                "Set country_patterns.canonical_input to the full reconstructed "
+                "country text, not only the second fragment."
             ),
             "example": "United + Kingdorn -> United Kingdom",
         },
         {
-            "sheet": "matching_behavior",
-            "column": "formatting tolerance",
+            "behavior": "formatting tolerance",
             "description": (
                 "Generated patterns tolerate case differences, extra whitespace, "
-                "punctuation, and merged or split words."
+                "punctuation inconsistencies, and merged or split words."
             ),
-            "example": "cote--d lv0ire",
+            "configuration_guidance": (
+                "Keep canonical_input readable; punctuation and spacing variants "
+                "usually do not need separate rows."
+            ),
+            "example": "cote--d lv0ire can match cote divoire",
         },
         {
-            "sheet": "matching_behavior",
-            "column": "fuzzy fallback",
+            "behavior": "OCR character substitutions",
+            "description": (
+                "Characters and tokens in letter_dictionary.variants are accepted "
+                "when patterns are generated from canonical_input."
+            ),
+            "configuration_guidance": (
+                "Add generic OCR substitutions to letter_dictionary; use commas "
+                "for multi-character tokens such as m,rn."
+            ),
+            "example": "0/O, 1/I/l, rn/m",
+        },
+        {
+            "behavior": "fuzzy fallback",
             "description": (
                 "If regex matching fails, normalized text is compared to the "
                 "configured canonical_input to allow minor spelling/OCR errors."
+            ),
+            "configuration_guidance": (
+                "For recurring country-specific errors, prefer explicit "
+                "country_patterns rows so behavior stays auditable."
             ),
             "example": "Kingdorn ~= Kingdom",
         },
@@ -295,10 +356,16 @@ def write_country_label_patterns_preset(path: Path) -> None:
     )
     country_df["enabled"] = True
     description_df = pd.DataFrame(_country_label_patterns_description_rows())
+    matching_behavior_df = pd.DataFrame(
+        _country_label_patterns_matching_behavior_rows()
+    )
 
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         letter_df.to_excel(writer, sheet_name="letter_dictionary", index=False)
         country_df.to_excel(writer, sheet_name="country_patterns", index=False)
+        matching_behavior_df.to_excel(
+            writer, sheet_name="matching_behavior", index=False
+        )
         description_df.to_excel(writer, sheet_name="description", index=False)
 
 

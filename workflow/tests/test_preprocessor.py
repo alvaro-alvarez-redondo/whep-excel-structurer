@@ -44,9 +44,9 @@ def test_lowercase_original_country_removes_non_letters_and_normalizes_spaces() 
 def test_lowercase_text_values_skips_geography_and_preserves_numbers() -> None:
     df = pd.DataFrame(
         {
-            "continent": ["EUROPE"],
-            "country": ["France"],
-            "description": ["Mixed CASE"],
+            "continent": ["EUROPE", "ASIA"],
+            "country": ["France", "China"],
+            "description": ["Mixed CASE", "UPPER"],
             "mixed": ["VALUE", 12],
             "amount": [10, 20],
         }
@@ -54,9 +54,9 @@ def test_lowercase_text_values_skips_geography_and_preserves_numbers() -> None:
 
     result = lowercase_text_values(df)
 
-    assert result["continent"].to_list() == ["EUROPE"]
-    assert result["country"].to_list() == ["France"]
-    assert result["description"].to_list() == ["mixed case"]
+    assert result["continent"].to_list() == ["EUROPE", "ASIA"]
+    assert result["country"].to_list() == ["France", "China"]
+    assert result["description"].to_list() == ["mixed case", "upper"]
     assert result["mixed"].to_list() == ["value", 12]
     assert result["amount"].to_list() == [10, 20]
 
@@ -135,11 +135,13 @@ def test_missing_country_label_patterns_excel_generates_preset(tmp_path: Path) -
     assert workbook.sheet_names == [
         "letter_dictionary",
         "country_patterns",
+        "matching_behavior",
         "description",
     ]
 
     letter_df = pd.read_excel(path, sheet_name="letter_dictionary")
     country_df = pd.read_excel(path, sheet_name="country_patterns")
+    matching_behavior_df = pd.read_excel(path, sheet_name="matching_behavior")
     description_df = pd.read_excel(path, sheet_name="description")
 
     assert list(letter_df.columns) == ["canonical_char", "variants"]
@@ -148,6 +150,12 @@ def test_missing_country_label_patterns_excel_generates_preset(tmp_path: Path) -
         "canonical_input",
         "correct_output",
         "enabled",
+    ]
+    assert list(matching_behavior_df.columns) == [
+        "behavior",
+        "description",
+        "configuration_guidance",
+        "example",
     ]
     assert list(description_df.columns) == [
         "sheet",
@@ -158,6 +166,7 @@ def test_missing_country_label_patterns_excel_generates_preset(tmp_path: Path) -
     assert {"letter_dictionary", "country_patterns", "matching_behavior"}.issubset(
         set(description_df["sheet"])
     )
+    assert "previous-row reconstruction" in set(matching_behavior_df["behavior"])
     assert patterns["asia"]
 
 
