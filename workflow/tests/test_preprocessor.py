@@ -135,13 +135,13 @@ def test_missing_country_label_patterns_excel_generates_preset(tmp_path: Path) -
     assert workbook.sheet_names == [
         "letter_dictionary",
         "country_patterns",
-        "matching_behavior",
+        "row_reconstruction",
         "description",
     ]
 
     letter_df = pd.read_excel(path, sheet_name="letter_dictionary")
     country_df = pd.read_excel(path, sheet_name="country_patterns")
-    matching_behavior_df = pd.read_excel(path, sheet_name="matching_behavior")
+    row_reconstruction_df = pd.read_excel(path, sheet_name="row_reconstruction")
     description_df = pd.read_excel(path, sheet_name="description")
 
     assert list(letter_df.columns) == ["canonical_char", "variants"]
@@ -151,11 +151,11 @@ def test_missing_country_label_patterns_excel_generates_preset(tmp_path: Path) -
         "correct_output",
         "enabled",
     ]
-    assert list(matching_behavior_df.columns) == [
-        "behavior",
-        "description",
-        "configuration_guidance",
-        "example",
+    assert list(row_reconstruction_df.columns) == [
+        "continent",
+        "reconstructed_input",
+        "correct_output",
+        "enabled",
     ]
     assert list(description_df.columns) == [
         "sheet",
@@ -163,10 +163,9 @@ def test_missing_country_label_patterns_excel_generates_preset(tmp_path: Path) -
         "description",
         "example",
     ]
-    assert {"letter_dictionary", "country_patterns", "matching_behavior"}.issubset(
+    assert {"letter_dictionary", "country_patterns", "row_reconstruction"}.issubset(
         set(description_df["sheet"])
     )
-    assert "previous-row reconstruction" in set(matching_behavior_df["behavior"])
     assert patterns["asia"]
 
 
@@ -183,24 +182,32 @@ def test_country_label_patterns_reconstruct_split_previous_row_fragment(
         ).to_excel(writer, sheet_name="letter_dictionary", index=False)
         pd.DataFrame(
             {
+                "continent": [],
+                "canonical_input": [],
+                "correct_output": [],
+                "enabled": [],
+            }
+        ).to_excel(writer, sheet_name="country_patterns", index=False)
+        pd.DataFrame(
+            {
                 "continent": ["EUROPE"],
-                "canonical_input": ["united kingdom"],
+                "reconstructed_input": ["united kingdom"],
                 "correct_output": ["United Kingdom"],
                 "enabled": [True],
             }
-        ).to_excel(writer, sheet_name="country_patterns", index=False)
+        ).to_excel(writer, sheet_name="row_reconstruction", index=False)
 
     patterns = load_country_label_patterns(str(path))
     df = pd.DataFrame(
         {
             "continent": ["EUROPE", "EUROPE"],
-            "country": ["United", "Kingdorn"],
+            "country": ["UNITED", "Kingd0rn"],
         }
     )
 
     result = apply_country_label_patterns(df, patterns)
 
-    assert result.loc[0, "country"] == "United"
+    assert result.loc[0, "country"] == "UNITED"
     assert result.loc[1, "country"] == "United Kingdom"
 
 
