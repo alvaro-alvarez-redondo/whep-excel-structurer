@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from iia_excel_reorg import preprocess_pipeline
 from iia_excel_reorg.preprocess_pipeline import main as preprocess_main
 from iia_excel_reorg.core.preprocessor import (
     apply_country_label_patterns,
@@ -62,6 +63,20 @@ def test_lowercase_text_values_skips_geography_and_preserves_numbers() -> None:
     assert result["description"].to_list() == ["mixed case", "already lower"]
     assert result["mixed"].to_list() == ["value", 12]
     assert result["amount"].to_list() == [10, 20]
+
+
+def test_lowercase_text_values_preserves_missing_string_columns() -> None:
+    df = pd.DataFrame(
+        {
+            "row_flag": pd.Series([pd.NA, pd.NA], dtype="string"),
+            "description": pd.Series(["Mixed CASE", pd.NA], dtype="string"),
+        }
+    )
+
+    result = lowercase_text_values(df)
+
+    assert result["row_flag"].isna().to_list() == [True, True]
+    assert result["description"].to_list() == ["mixed case", pd.NA]
 
 
 def test_saar_is_prefixed_as_france_not_germany() -> None:
@@ -155,6 +170,28 @@ def test_preprocess_pipeline_creates_country_label_patterns_preset(
     row_reconstruction = pd.read_excel(preset_path, sheet_name="row_reconstruction")
     assert list(row_reconstruction.columns) == ["input", "enabled"]
     assert "dependent territories" in row_reconstruction["input"].to_list()
+
+
+def test_process_entry_hides_traceback_by_default(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    def fail_process_workbook(*args, **kwargs) -> None:
+        raise TypeError("example failure")
+
+    source_path = tmp_path / "input.xlsx"
+    target_path = tmp_path / "output.xlsx"
+    monkeypatch.setattr(preprocess_pipeline, "process_workbook", fail_process_workbook)
+
+    preprocess_pipeline._process_entry(
+        (source_path, target_path),
+        tmp_path / "country_label_patterns.xlsx",
+    )
+
+    output = capsys.readouterr().out
+    assert "TypeError: example failure" in output
+    assert "Traceback" not in output
 
 
 def test_country_label_patterns_can_be_loaded_from_excel(tmp_path: Path) -> None:

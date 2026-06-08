@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
             f"Defaults to {PREPROCESS_COUNTRY_LABEL_PATTERNS_PATH}."
         ),
     )
+    parser.add_argument(
+        "--show-tracebacks",
+        action="store_true",
+        help="Print full Python tracebacks for workbook processing errors.",
+    )
     return parser
 
 
@@ -134,7 +139,12 @@ def _prepare_entry(entry: WorkbookEntry) -> None:
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _process_entry(entry: WorkbookEntry, country_label_patterns_path: Path) -> None:
+def _process_entry(
+    entry: WorkbookEntry,
+    country_label_patterns_path: Path,
+    *,
+    show_traceback: bool = False,
+) -> None:
     """Process a single workbook and write it to the target path."""
     source_path, target_path = entry
     try:
@@ -143,9 +153,10 @@ def _process_entry(entry: WorkbookEntry, country_label_patterns_path: Path) -> N
             target_path,
             country_label_patterns_path=country_label_patterns_path,
         )
-    except Exception:
-        print(f"\nError processing {source_path}:")
-        traceback.print_exc()
+    except Exception as exc:
+        print(f"\nError processing {source_path}: {type(exc).__name__}: {exc}")
+        if show_traceback:
+            traceback.print_exc()
 
 
 def main() -> None:
@@ -180,7 +191,11 @@ def main() -> None:
     _run_progress(
         "Preparing excels",
         workbook_entries,
-        lambda entry: _process_entry(entry, country_label_patterns_path),
+        lambda entry: _process_entry(
+            entry,
+            country_label_patterns_path,
+            show_traceback=args.show_tracebacks,
+        ),
     )
 
     elapsed = time.perf_counter() - start_time

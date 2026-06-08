@@ -737,7 +737,12 @@ def lowercase_original_country(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def lowercase_text_values(df: pd.DataFrame) -> pd.DataFrame:
-    """Lowercase text values except in protected geography columns."""
+    """Lowercase text values except in protected geography columns.
+
+    Assignment is limited to cells that already contain strings so pandas string
+    extension columns containing only missing values keep their dtype-compatible
+    missing sentinel instead of receiving ``float("nan")`` values.
+    """
     text_column_positions = [
         idx
         for idx, col in enumerate(df.columns)
@@ -753,9 +758,10 @@ def lowercase_text_values(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     for idx in text_column_positions:
         series = df.iloc[:, idx]
-        df.iloc[:, idx] = series.map(
-            lambda value: value.lower() if isinstance(value, str) else value
-        )
+        string_mask = series.map(lambda value: isinstance(value, str))
+        if not string_mask.any():
+            continue
+        df.iloc[string_mask.to_numpy(), idx] = series.loc[string_mask].str.lower()
     return df
 
 
