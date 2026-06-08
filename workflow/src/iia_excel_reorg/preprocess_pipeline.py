@@ -11,7 +11,7 @@ from collections import deque
 from pathlib import Path
 from typing import Callable, TypeAlias
 
-from .core.preprocessor import process_workbook
+from .core.preprocessor import create_country_label_patterns_preset, process_workbook
 from .paths import (
     PREPROCESS_COUNTRY_LABEL_PATTERNS_PATH,
     PREPROCESS_INPUT_DIR,
@@ -54,8 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--country-label-patterns",
         default=str(PREPROCESS_COUNTRY_LABEL_PATTERNS_PATH),
         help=(
-            "Excel workbook with letter_dictionary and country_patterns sheets. "
-            "Defaults to data/preprocess/country_label_patterns.xlsx."
+            "Excel workbook with letter_dictionary, country_patterns, and "
+            "row_reconstruction sheets. Created with preset examples if missing. "
+            f"Defaults to {PREPROCESS_COUNTRY_LABEL_PATTERNS_PATH}."
         ),
     )
     return parser
@@ -156,6 +157,9 @@ def main() -> None:
     output_root = Path(args.output_dir)
     country_label_patterns_path = Path(args.country_label_patterns)
     _ensure_workspace(input_path, output_root)
+    country_label_patterns_path = create_country_label_patterns_preset(
+        country_label_patterns_path
+    )
 
     if input_path.is_file():
         workbook_entries: list[WorkbookEntry] = [

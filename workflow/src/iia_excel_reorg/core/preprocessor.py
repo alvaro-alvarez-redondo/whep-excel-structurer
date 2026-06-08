@@ -143,6 +143,38 @@ def _default_country_label_patterns() -> CountryLabelPatterns:
     )
 
 
+def create_country_label_patterns_preset(path: str | Path) -> Path:
+    """Create the default country-label pattern workbook when it is missing.
+
+    The workbook is intended as the editable preprocessing input/preset file. It
+    includes the OCR letter dictionary, country-label rules, and a
+    two-column ``row_reconstruction`` sheet with example inputs. Existing files
+    are never overwritten.
+    """
+    output_path = Path(path)
+    if output_path.exists():
+        return output_path
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            DEFAULT_OCR_LETTER_SUBSTITUTIONS,
+            columns=["canonical_char", "variants"],
+        ).to_excel(writer, sheet_name="letter_dictionary", index=False)
+        pd.DataFrame(
+            DEFAULT_COUNTRY_LABEL_RULES,
+            columns=["continent", "canonical_input", "correct_output"],
+        ).assign(enabled=True).to_excel(
+            writer, sheet_name="country_patterns", index=False
+        )
+        pd.DataFrame(
+            DEFAULT_ROW_RECONSTRUCTION_INPUTS,
+            columns=["input", "enabled"],
+        ).to_excel(writer, sheet_name="row_reconstruction", index=False)
+
+    return output_path
+
+
 def _country_label_patterns_from_excel(path: Path) -> CountryLabelPatterns:
     letter_df = pd.read_excel(path, sheet_name="letter_dictionary")
     country_df = pd.read_excel(path, sheet_name="country_patterns")
@@ -232,6 +264,12 @@ DEFAULT_COUNTRY_LABEL_RULES = (
     ("europe", "soviet zone", "Germany Soviet Zone"),
     ("europe", "soviet", "Germany Soviet Zone"),
     ("europe", "berlin", "Germany Berlin"),
+)
+
+DEFAULT_ROW_RECONSTRUCTION_INPUTS = (
+    ("dependent territories", True),
+    ("overseas territories", False),
+    ("protectorates", False),
 )
 
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pandas as pd
 
+from iia_excel_reorg.preprocess_pipeline import main as preprocess_main
 from iia_excel_reorg.core.preprocessor import (
     apply_country_label_patterns,
+    create_country_label_patterns_preset,
     lowercase_text_values,
     lowercase_original_country,
     load_country_label_patterns,
@@ -97,6 +100,61 @@ def test_country_prefixes_are_applied_across_matching_rows() -> None:
         "Germany Berlin",
         "Bizone",
     ]
+
+
+def test_country_label_patterns_preset_includes_row_reconstruction_examples(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "country_label_patterns.xlsx"
+
+    created_path = create_country_label_patterns_preset(path)
+
+    assert created_path == path
+    with pd.ExcelFile(path) as workbook:
+        assert workbook.sheet_names == [
+            "letter_dictionary",
+            "country_patterns",
+            "row_reconstruction",
+        ]
+        row_reconstruction = pd.read_excel(workbook, sheet_name="row_reconstruction")
+
+    assert list(row_reconstruction.columns) == ["input", "enabled"]
+    assert row_reconstruction["input"].to_list() == [
+        "dependent territories",
+        "overseas territories",
+        "protectorates",
+    ]
+
+
+def test_country_label_patterns_preset_does_not_overwrite_existing_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "country_label_patterns.xlsx"
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        pd.DataFrame({"input": ["custom"], "enabled": [True]}).to_excel(
+            writer, sheet_name="row_reconstruction", index=False
+        )
+
+    created_path = create_country_label_patterns_preset(path)
+    row_reconstruction = pd.read_excel(created_path, sheet_name="row_reconstruction")
+
+    assert row_reconstruction["input"].to_list() == ["custom"]
+
+
+def test_preprocess_pipeline_creates_country_label_patterns_preset(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["iia-prepare"])
+
+    preprocess_main()
+
+    preset_path = tmp_path / "data" / "country_label_patterns.xlsx"
+    assert preset_path.exists()
+    row_reconstruction = pd.read_excel(preset_path, sheet_name="row_reconstruction")
+    assert list(row_reconstruction.columns) == ["input", "enabled"]
+    assert "dependent territories" in row_reconstruction["input"].to_list()
 
 
 def test_country_label_patterns_can_be_loaded_from_excel(tmp_path: Path) -> None:
