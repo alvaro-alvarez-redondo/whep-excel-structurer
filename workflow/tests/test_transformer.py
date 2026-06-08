@@ -337,14 +337,17 @@ def test_transform_workbook_inserts_blank_row_before_each_new_continent(
 
     result = read_workbook(output_path)
     area = result.sheets[0]
-    assert area.get_cell(2, 2).value == "EUROPE"
-    assert area.get_cell(2, 3).value == "Austria"
-    assert area.get_cell(3, 1).value is None
-    assert area.get_cell(3, 2).value is None
-    assert area.get_cell(3, 3).value is None
-    assert area.get_cell(4, 2).value == "ASIE"
-    assert area.get_cell(4, 3).value == "Japan"
-    assert area.get_cell(4, 3).fill_rgb == YELLOW
+    assert area.get_cell(2, 1).value is None
+    assert area.get_cell(2, 2).value is None
+    assert area.get_cell(2, 3).value is None
+    assert area.get_cell(3, 2).value == "EUROPE"
+    assert area.get_cell(3, 3).value == "Austria"
+    assert area.get_cell(4, 1).value is None
+    assert area.get_cell(4, 2).value is None
+    assert area.get_cell(4, 3).value is None
+    assert area.get_cell(5, 2).value == "ASIE"
+    assert area.get_cell(5, 3).value == "Japan"
+    assert area.get_cell(5, 3).fill_rgb == YELLOW
 
 
 def test_transform_workbook_maps_world_total_country_to_world_continent(

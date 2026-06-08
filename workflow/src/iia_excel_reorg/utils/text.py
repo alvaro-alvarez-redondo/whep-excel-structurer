@@ -62,3 +62,21 @@ def derive_product_from_document(document_name: str) -> str:
 
     product_tokens = tokens[product_start:] or tokens[-1:]
     return normalize_text(" ".join(product_tokens))
+
+
+def format_elapsed(seconds: float) -> str:
+    """Format *seconds* into a human-readable elapsed-time string.
+
+    * ``< 60 s``      → ``45.50s``
+    * ``>= 60 s``     → ``01:27.12`` (mm:ss.ms)
+    * ``>= 60 min``   → ``01:02:30.15`` (hh:mm:ss.ms)
+    """
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+
+    minutes, sec = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{int(minutes):02d}:{sec:05.2f}"
+
+    hours, minutes = divmod(int(minutes), 60)
+    return f"{hours:02d}:{minutes:02d}:{sec:05.2f}"

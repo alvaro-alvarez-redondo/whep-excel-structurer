@@ -1,4 +1,4 @@
-"""Independent pipeline for harmonizing footnotes in ``10-raw_imports`` workbooks."""
+"""Independent pipeline for harmonizing footnotes in transformed workbooks."""
 
 from __future__ import annotations
 
@@ -7,10 +7,11 @@ import sys
 from pathlib import Path
 
 from .io.xlsx import SheetData, WorkbookData, read_workbook, write_workbook
+from .paths import FOOTNOTE_MAPPING_PATH, TRANSFORM_OUTPUT_DIR
 
 PIPELINE_NAME = "Footnote Harmonization Pipeline"
-DEFAULT_INPUT_DIR = Path("data/10-raw_imports")
-DEFAULT_TEMPLATE_PATH = Path("data/footnote_mapping.xlsx")
+DEFAULT_INPUT_DIR = TRANSFORM_OUTPUT_DIR
+DEFAULT_TEMPLATE_PATH = FOOTNOTE_MAPPING_PATH
 _EXCEL_SUFFIXES = frozenset({".xlsx", ".xlsm"})
 _ORIGINAL_FOOTNOTE_HEADER = "original footnote"
 _CLEANED_FOOTNOTE_HEADER = "cleaned footnote"
@@ -172,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     generate_parser = subparsers.add_parser(
         "generate-template",
-        help="Scan 10-raw_imports and create a footnote mapping template workbook.",
+        help="Scan transformed outputs and create a footnote mapping template workbook.",
     )
     generate_parser.add_argument("input_dir", nargs="?", default=str(DEFAULT_INPUT_DIR))
     generate_parser.add_argument(

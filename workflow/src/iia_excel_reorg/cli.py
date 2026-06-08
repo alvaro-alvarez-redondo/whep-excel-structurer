@@ -20,8 +20,9 @@ from .core.transformer import (
     UnitFootnoteDocumentIndex,
     transform_workbook,
 )
+from .paths import TRANSFORM_INPUT_DIR, TRANSFORM_LISTS_DIR, TRANSFORM_OUTPUT_DIR
 from .utils.naming import sanitize_name
-from .utils.text import derive_product_from_document
+from .utils.text import derive_product_from_document, format_elapsed
 from .xlsx_io import read_workbook
 
 WorkbookEntry: TypeAlias = tuple[Path, Path]
@@ -32,8 +33,8 @@ _EXTRACTED_PAGES_RE = re.compile(
     re.IGNORECASE,
 )
 _EXCEL_SUFFIXES = frozenset({".xlsx", ".xlsm"})
-DEFAULT_INPUT_DIR = Path("data/raw_inputs")
-DEFAULT_OUTPUT_DIR = Path("data/10-raw_imports")
+DEFAULT_INPUT_DIR = TRANSFORM_INPUT_DIR
+DEFAULT_OUTPUT_DIR = TRANSFORM_OUTPUT_DIR
 HEMISPHERE_INDEX_FILENAME = "unique_hemisphere_values.txt"
 CONTINENT_INDEX_FILENAME = "unique_continent_values.txt"
 COUNTRY_INDEX_FILENAME = "unique_country_values.txt"
@@ -47,8 +48,7 @@ NON_YEAR_HEADER_DOCUMENT_INDEX_FILENAME = (
     "final_docs_with_extra_non_year_columns.txt"
 )
 DUPLICATE_ORIGINAL_DOCUMENTS_FILENAME = "duplicated_original_documents.txt"
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-LISTS_DIR = PROJECT_ROOT / "data" / "lists"
+LISTS_DIR = TRANSFORM_LISTS_DIR
 
 
 class DuplicateOriginalDocumentIndex:
@@ -102,8 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_INPUT_DIR),
         help=(
             "Excel workbook file or directory containing workbook files. "
-            "Defaults to the 'data/raw_inputs/' folder in the current directory. "
-            'Quote the path when it contains spaces: "data/raw_inputs".'
+            "Defaults to the 'data/transform/00_input/' folder in the current directory. "
+            'Quote the path when it contains spaces: "data/transform/00_input".'
         ),
     )
     parser.add_argument(
@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_OUTPUT_DIR),
         help=(
             "Directory where transformed workbooks will be written. "
-            "Defaults to '10-raw_imports/' in the current directory."
+            "Defaults to 'data/transform/01_output/' in the current directory."
         ),
     )
     parser.add_argument(
@@ -384,7 +384,7 @@ def main() -> None:
         ],
     )
     elapsed = time.perf_counter() - start_time
-    print(f"Done in {elapsed:.2f}s")
+    print(f"Done in {format_elapsed(elapsed)}")
 
 
 if __name__ == "__main__":

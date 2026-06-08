@@ -618,10 +618,10 @@ def _build_output_rows(
     )
 
     # Precompute blank-row mask: True for every country where the continent
-    # group changes relative to the previous country (not the first country).
+    # group changes relative to the previous country, plus the first country.
     groups_at_countries: np.ndarray = cont_group[country_indices]
     blank_before: np.ndarray = np.concatenate(
-        [[False], groups_at_countries[1:] != groups_at_countries[:-1]]
+        [[True], groups_at_countries[1:] != groups_at_countries[:-1]]
     )
 
     # Build one OutputRow per country in a single comprehension.

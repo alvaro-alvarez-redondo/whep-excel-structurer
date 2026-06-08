@@ -9,9 +9,9 @@ structured, analysis-ready workbooks.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  1. INPUT  –  place historical .xlsx scans in data/raw_inputs/      │
+│  1. INPUT  –  place historical .xlsx scans in data/transform/00_input/  │
 │                                                                     │
-│  data/raw_inputs/                                                   │
+│  data/transform/00_input/                                           │
 │  ├── trade/extracted_pages_1938_39/reviewed_466_475arrozimp.xlsx    │
 │  ├── livestock/extracted_pages_1933_34/reviewed_12_15cattle.xlsx    │
 │  └── area and production/                                           │
@@ -36,8 +36,8 @@ structured, analysis-ready workbooks.
 │  3. RUN  –  execute the CLI from the project root                   │
 │                                                                     │
 │  iia-excel-reorg --config workflow/config/example.units.yml         │
-│  (defaults: input = "data/raw_inputs/",                             │
-│             output = "data/10-raw_imports/")                        │
+│  (defaults: input = "data/transform/00_input/",                    │
+│             output = "data/transform/01_output/")                  │
 └────────────────────────┬────────────────────────────────────────────┘
                          │
                   per workbook file
@@ -86,9 +86,9 @@ structured, analysis-ready workbooks.
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  7. OUTPUT  –  results land in 10-raw_imports/                      │
+│  7. OUTPUT  –  results land in data/transform/01_output/           │
 │                                                                     │
-│  10-raw_imports/                                                    │
+│  data/transform/01_output/                                         │
 │  └── iia_extracted_pages_1938/                                      │
 │      └── iia_trade_1938/                                            │
 │          └── r_iia_trade_1938_466_475_rice.xlsx                     │
@@ -99,10 +99,10 @@ structured, analysis-ready workbooks.
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**In short:** drop your scanned Excel files into `data/raw_inputs/`, point the
-CLI at your config, and the tool produces one clean, consistently structured
-workbook per source file inside `data/10-raw_imports/`, organised into
-`iia_extracted_pages_YYYY/iia_{topic}_YYYY/` subdirectories.
+**In short:** drop your scanned Excel files into `data/transform/00_input/`,
+point the CLI at your config, and the tool produces one clean, consistently
+structured workbook per source file inside `data/transform/01_output/`,
+organised into `iia_extracted_pages_YYYY/iia_{topic}_YYYY/` subdirectories.
 
 ---
 
@@ -123,11 +123,11 @@ The transformer currently supports the rules you specified:
 - keeps repeated country/entity rows exactly as they appear in the source workbook
 - assigns `unit` automatically from the document category, sheet variable, and source product using the rules you provided
 - harmonizes reviewed document names into the canonical `r_iia_<yearbook>_<year>_<page_start>_<page_end>_<english_product>` format
-- derives missing yearbook metadata from the folder path, for example `data/raw_inputs/trade/extracted_pages_1938_39/...` becomes `trade` and `1938`
+- derives missing yearbook metadata from the folder path, for example `data/transform/00_input/trade/extracted_pages_1938_39/...` becomes `trade` and `1938`
 - strips source suffixes such as `sup`, `prod`, `rend`, `imp`, `exp`, and `num` before translating the product portion of the document name
 - supports both the standard iia unit rules and the special `inputs` unit rules
 - includes automated tests and a GitHub Actions CI workflow
-- writes text indexes under `data/lists/`, including unique geography values and unique renamed product values
+- writes text indexes under `data/transform/lists/`, including unique geography values and unique renamed product values
 
 ## Project structure
 
@@ -149,9 +149,14 @@ The transformer currently supports the rules you specified:
 │   │   └── xlsx_io.py
 │   └── tests/test_transformer.py
 └── data/                        ← input + output
-    ├── raw_inputs/              ← place source Excel files here
-    ├── 10-raw_imports/          ← transformed output written here
-    └── lists/                   ← generated text indexes (geography + products)
+    ├── preprocess/              ← pre-processing pipeline
+    │   ├── 00_input/            ← raw excels needing human prep
+    │   └── 01_output/           ← human-ready output
+    ├── transform/               ← main transformation pipeline
+    │   ├── 00_input/            ← place source Excel files here
+    │   ├── 01_output/           ← transformed output written here
+    │   └── lists/               ← generated text indexes
+    └── footnote_mapping.xlsx    ← shared footnote mapping template
 ```
 
 ## Installation
@@ -182,12 +187,12 @@ provided, automatically uses `workflow/config/example.units.yml`.  You can still
 override the defaults by passing the same arguments supported by the main CLI:
 
 ```bash
-python run_project.py "data/raw_inputs" "data/10-raw_imports" --config workflow/config/example.units.yml
+python run_project.py "data/transform/00_input" "data/transform/01_output" --config workflow/config/example.units.yml
 ```
 
-> **Folder name:** the input directory is called **`data/raw_inputs/`** (with a
-> space in `raw_inputs`).  Make sure you place your Excel files under
-> `data/raw_inputs/` at the project root.
+> **Folder name:** the input directory is called **`data/transform/00_input/`**.
+> Make sure you place your Excel files under `data/transform/00_input/` at the
+> project root.
 
 ## Configuration
 
@@ -230,13 +235,13 @@ You can use the example file at `workflow/config/example.units.yml` as a startin
 
 ### Where to place the input files
 
-Drop your Excel workbooks into the **`data/raw_inputs/`** folder at the root of this
+Drop your Excel workbooks into the **`data/transform/00_input/`** folder at the root of this
 project.  That directory is already created and pre-structured to mirror the
 exact source layout described below.  Git ignores any `*.xlsx` / `*.xlsm` files
 inside it, so your source files won't be accidentally committed.
 
 ```text
-data/raw_inputs/                    ← place your source Excel files here
+data/transform/00_input/           ← place your source Excel files here
 ├── area and production/
 │   ├── multiple product/
 │   │   ├── extracted_pages_1933_34/   ← drop .xlsx files in the appropriate year folder
@@ -285,9 +290,9 @@ data/raw_inputs/                    ← place your source Excel files here
     └── extracted_pages_1938_39/
 ```
 
-Transformed workbooks are written to **`data/10-raw_imports/`** inside the
-`data/` folder.  That directory is pre-created and its generated `*.xlsx` files
-are gitignored.
+Transformed workbooks are written to **`data/transform/01_output/`** inside
+the `data/` folder.  That directory is pre-created and its generated `*.xlsx`
+files are gitignored.
 
 ### Expected input structure (technical detail)
 
@@ -320,7 +325,7 @@ still processed but land directly in the output root.
 ### Generated output structure
 
 ```text
-data/10-raw_imports/
+data/transform/01_output/
 └── iia_extracted_pages_YYYY/
     └── iia_{topic}_YYYY/
         └── r_iia_<topic>_<year>_<start>_<end>_<product>.xlsx
@@ -340,7 +345,7 @@ The subfolder name is derived from:
 Input:
 
 ```text
-data/raw_inputs/
+data/transform/00_input/
 └── trade/
     └── extracted_pages_1938_39/
         ├── reviewed_466_475arrozimp_exp.xlsx
@@ -351,7 +356,7 @@ data/raw_inputs/
 Generated output:
 
 ```text
-data/10-raw_imports/
+data/transform/01_output/
 └── iia_extracted_pages_1938/
     ├── iia_trade_1938/
     │   └── r_iia_trade_1938_466_475_rice.xlsx
@@ -372,11 +377,11 @@ data/10-raw_imports/
 
 ## Usage
 
-Once your Excel files are in place under `data/raw_inputs/`, run the tool from the
-project root:
+Once your Excel files are in place under `data/transform/00_input/`, run the tool
+from the project root:
 
 ```bash
-# Use the conventional default paths (data/raw_inputs/ → data/10-raw_imports/)
+# Use the conventional default paths (data/transform/00_input/ → data/transform/01_output/)
 iia-excel-reorg --config workflow/config/example.units.yml
 ```
 
@@ -390,28 +395,59 @@ iia-excel-reorg path/to/source.xlsx path/to/output/ --config workflow/config/exa
 iia-excel-reorg path/to/input_dir path/to/output/ --config workflow/config/example.units.yml
 ```
 
-The `input` argument defaults to `data/raw_inputs/` and the `output_dir` argument
-defaults to `data/10-raw_imports/` — both relative to the current working directory.
+The `input` argument defaults to `data/transform/00_input/` and the `output_dir`
+argument defaults to `data/transform/01_output/` — both relative to the current
+working directory.
 
 ### Independent pipeline: Footnote Harmonization Pipeline
 
 Use the independent `iia-footnote-harmonizer` command to clean and remap
-footnotes directly inside `data/10-raw_imports/` while preserving the exact
-folder/file layout.
+footnotes directly inside `data/transform/01_output/` while preserving the
+exact folder/file layout.
 
 ```bash
-# 1) Scan all files in 10-raw_imports and generate a mapping template
-iia-footnote-harmonizer generate-template data/10-raw_imports data/footnote_mapping.xlsx
+# 1) Scan all files and generate a mapping template
+iia-footnote-harmonizer generate-template data/transform/01_output data/footnote_mapping.xlsx
 
 # 2) Fill "Cleaned Footnote" manually in the generated template
 
-# 3) Apply mapping in place to every workbook under 10-raw_imports
-iia-footnote-harmonizer apply-mapping data/10-raw_imports data/footnote_mapping.xlsx
+# 3) Apply mapping in place to every workbook
+iia-footnote-harmonizer apply-mapping data/transform/01_output data/footnote_mapping.xlsx
 ```
 
 The template contains two columns: `Original Footnote` (auto-populated with all
 unique footnotes found across files/sheets/rows) and `Cleaned Footnote` (manual
 mapping target). Multiple original footnotes may map to the same cleaned value.
+
+### Independent pipeline: Pre-processing for Human Review
+
+Use the `iia-prepare` command (or `run_preprocessing.py` for VS Code) to copy
+raw Excel files into a human-ready workspace while preserving the exact folder
+structure.
+
+```bash
+# Copy all Excel files from source to prepared workspace
+iia-prepare
+
+# Or specify custom paths
+iia-prepare path/to/source path/to/prepared
+```
+
+**Default paths:**
+- Input: `data/preprocess/00_input/`
+- Output: `data/preprocess/01_output/`
+
+The pipeline:
+1. Discovers all `.xlsx` / `.xlsm` files recursively
+2. Mirrors the exact folder/subfolder structure into the output
+3. Shows progress bars matching the main pipeline aesthetics
+4. Is designed to be extended with custom preparation edits
+
+**VS Code runner:**
+
+```bash
+python run_preprocessing.py
+```
 
 ## Transformation rules implemented
 
@@ -466,7 +502,7 @@ Reviewed source names are converted with these rules:
 
 - `reviewed_` becomes `r_`
 - missing agency defaults to `iia`
-- yearbook metadata comes from the folder path, for example `raw_inputs/trade/extracted_pages_1938_39` becomes `trade` and `1938`
+- yearbook metadata comes from the folder path, for example `transform/00_input/trade/extracted_pages_1938_39` becomes `trade` and `1938`
 - the product segment is stripped of trailing suffixes like `sup`, `prod`, `rend`, `imp`, `exp`, and `num`
 - the remaining product is translated to English for the output filename
 
