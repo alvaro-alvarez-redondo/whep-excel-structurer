@@ -54,8 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--country-label-patterns",
         default=str(PREPROCESS_COUNTRY_LABEL_PATTERNS_PATH),
         help=(
-            "Excel workbook with letter_dictionary and country_patterns sheets. "
-            "Defaults to data/preprocess/country_label_patterns.xlsx."
+            "Excel workbook with letter_dictionary, country_patterns, "
+            "row_reconstruction, and description sheets. Defaults to "
+            "data/country_label_patterns.xlsx; "
+            "a preset workbook is generated there when missing."
         ),
     )
     return parser
