@@ -12,7 +12,7 @@ from iia_excel_reorg.core.preprocessor import (
     lowercase_text_values,
     lowercase_original_country,
     load_country_label_patterns,
-    load_row_reconstruction_inputs,
+    load_row_reconstruction_patterns,
     normalize_region_totals,
     prefix_china_countries,
     prefix_france_countries_in_europe,
@@ -183,9 +183,15 @@ def test_country_label_patterns_can_be_loaded_from_excel(tmp_path: Path) -> None
     assert result.loc[0, "country"] == "Test Customland"
 
 
-def test_row_reconstruction_inputs_load_enabled_rows_from_excel(tmp_path: Path) -> None:
+def test_row_reconstruction_patterns_use_letter_dictionary(tmp_path: Path) -> None:
     path = tmp_path / "country_label_patterns.xlsx"
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "canonical_char": ["e"],
+                "variants": ["ea"],
+            }
+        ).to_excel(writer, sheet_name="letter_dictionary", index=False)
         pd.DataFrame(
             {
                 "input": [
@@ -197,9 +203,15 @@ def test_row_reconstruction_inputs_load_enabled_rows_from_excel(tmp_path: Path) 
             }
         ).to_excel(writer, sheet_name="row_reconstruction", index=False)
 
-    inputs = load_row_reconstruction_inputs(str(path))
+    patterns = load_row_reconstruction_patterns(str(path))
+    df = pd.DataFrame({"country": ["United Kingdom", "Dapandant Tarritorias"]})
 
-    assert inputs == ("dependent territories",)
+    result = reconstruct_rows_from_previous_country(df, patterns)
+
+    assert result["country"].to_list() == [
+        "United Kingdom",
+        "United Kingdom Dapandant Tarritorias",
+    ]
 
 
 def test_reconstruct_rows_from_previous_country_concatenates_exact_previous_row() -> None:
@@ -210,7 +222,7 @@ def test_reconstruct_rows_from_previous_country_concatenates_exact_previous_row(
         }
     )
 
-    result = reconstruct_rows_from_previous_country(df, ("dependent territories",))
+    result = reconstruct_rows_from_previous_country(df, (r"dependent\s+territories",))
 
     assert result["country"].to_list() == [
         "United Kingdom",
