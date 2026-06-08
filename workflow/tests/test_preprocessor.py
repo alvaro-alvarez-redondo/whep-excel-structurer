@@ -9,12 +9,14 @@ from iia_excel_reorg.core.preprocessor import (
     lowercase_text_values,
     lowercase_original_country,
     load_country_label_patterns,
+    load_row_reconstruction_inputs,
     normalize_region_totals,
     prefix_china_countries,
     prefix_france_countries_in_europe,
     prefix_germany_countries_in_europe,
     remove_original_country_column,
     replace_duplicate_country_totals,
+    reconstruct_rows_from_previous_country,
 )
 
 
@@ -42,9 +44,9 @@ def test_lowercase_original_country_removes_non_letters_and_normalizes_spaces() 
 def test_lowercase_text_values_skips_geography_and_preserves_numbers() -> None:
     df = pd.DataFrame(
         {
-            "continent": ["EUROPE"],
-            "country": ["France"],
-            "description": ["Mixed CASE"],
+            "continent": ["EUROPE", "EUROPE"],
+            "country": ["France", "Germany"],
+            "description": ["Mixed CASE", "Already lower"],
             "mixed": ["VALUE", 12],
             "amount": [10, 20],
         }
@@ -52,9 +54,9 @@ def test_lowercase_text_values_skips_geography_and_preserves_numbers() -> None:
 
     result = lowercase_text_values(df)
 
-    assert result["continent"].to_list() == ["EUROPE"]
-    assert result["country"].to_list() == ["France"]
-    assert result["description"].to_list() == ["mixed case"]
+    assert result["continent"].to_list() == ["EUROPE", "EUROPE"]
+    assert result["country"].to_list() == ["France", "Germany"]
+    assert result["description"].to_list() == ["mixed case", "already lower"]
     assert result["mixed"].to_list() == ["value", 12]
     assert result["amount"].to_list() == [10, 20]
 
@@ -121,6 +123,43 @@ def test_country_label_patterns_can_be_loaded_from_excel(tmp_path: Path) -> None
     result = apply_country_label_patterns(df, patterns)
 
     assert result.loc[0, "country"] == "Test Customland"
+
+
+def test_row_reconstruction_inputs_load_enabled_rows_from_excel(tmp_path: Path) -> None:
+    path = tmp_path / "country_label_patterns.xlsx"
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "input": [
+                    "dependent territories",
+                    "disabled label",
+                    "DEPENDENT TERRITORIES",
+                ],
+                "enabled": [True, False, True],
+            }
+        ).to_excel(writer, sheet_name="row_reconstruction", index=False)
+
+    inputs = load_row_reconstruction_inputs(str(path))
+
+    assert inputs == ("dependent territories",)
+
+
+def test_reconstruct_rows_from_previous_country_concatenates_exact_previous_row() -> None:
+    df = pd.DataFrame(
+        {
+            "country": ["United Kingdom", "Dependent   Territories", "France"],
+            "value": [1, 2, 3],
+        }
+    )
+
+    result = reconstruct_rows_from_previous_country(df, ("dependent territories",))
+
+    assert result["country"].to_list() == [
+        "United Kingdom",
+        "United Kingdom Dependent   Territories",
+        "France",
+    ]
+    assert result["value"].to_list() == [1, 2, 3]
 
 
 def test_normalize_region_totals_ignores_non_letters_in_original_country() -> None:

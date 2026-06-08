@@ -53,6 +53,19 @@ def _normalize_original_country_match_value(value: str) -> str:
 
 
 CountryLabelPatterns = dict[str, tuple[tuple[str, str], ...]]
+RowReconstructionInputs = tuple[str, ...]
+
+
+def _is_enabled(value: object) -> bool:
+    """Return whether a configuration row is enabled."""
+    if pd.isna(value):
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().casefold()
+    return text not in {"", "0", "false", "f", "no", "n", "off", "disabled"}
 
 
 def _parse_variant_chars(value: object) -> str:
@@ -139,7 +152,7 @@ def _country_label_patterns_from_excel(path: Path) -> CountryLabelPatterns:
     )
 
     if "enabled" in country_df.columns:
-        enabled = country_df["enabled"].fillna(True).astype(bool)
+        enabled = country_df["enabled"].map(_is_enabled)
         country_df = country_df.loc[enabled]
 
     country_rows = tuple(
@@ -159,6 +172,45 @@ def load_country_label_patterns(path: str | None = None) -> CountryLabelPatterns
     if not pattern_path.exists():
         return _default_country_label_patterns()
     return _country_label_patterns_from_excel(pattern_path)
+
+
+def _row_reconstruction_inputs_from_excel(path: Path) -> RowReconstructionInputs:
+    """Load enabled row-reconstruction input strings from the config workbook."""
+    try:
+        row_df = pd.read_excel(path, sheet_name="row_reconstruction")
+    except ValueError:
+        return ()
+
+    if "input" not in row_df.columns:
+        return ()
+
+    if "enabled" in row_df.columns:
+        row_df = row_df.loc[row_df["enabled"].map(_is_enabled)]
+
+    inputs: list[str] = []
+    seen: set[str] = set()
+    for value in row_df["input"]:
+        if pd.isna(value):
+            continue
+        text = str(value).strip()
+        normalized = _normalize_country_label_series(pd.Series([text])).iat[0]
+        if not text or not normalized or normalized in seen:
+            continue
+        inputs.append(text)
+        seen.add(normalized)
+    return tuple(inputs)
+
+
+@lru_cache(maxsize=8)
+def load_row_reconstruction_inputs(path: str | None = None) -> RowReconstructionInputs:
+    """Load enabled row-reconstruction inputs from the config workbook."""
+    pattern_path = (
+        Path(path) if path is not None else PREPROCESS_COUNTRY_LABEL_PATTERNS_PATH
+    )
+    if not pattern_path.exists():
+        return ()
+    return _row_reconstruction_inputs_from_excel(pattern_path)
+
 
 DEFAULT_OCR_LETTER_SUBSTITUTIONS = (
     ("a", "aeou"),
@@ -516,6 +568,50 @@ def _prefix_countries_by_patterns(
     return df
 
 
+def reconstruct_rows_from_previous_country(
+    df: pd.DataFrame, inputs: RowReconstructionInputs | None = None
+) -> pd.DataFrame:
+    """Prepend the exact previous country to rows matching configured inputs.
+
+    The ``row_reconstruction`` sheet supplies the input strings to match. When
+    the current ``country`` value matches one of those enabled inputs, the
+    current value is replaced with ``<previous country> <current country>``.
+    Matching is accent-insensitive, case-insensitive, whitespace-normalized, and
+    treats OCR ``0`` as ``o`` in the same way as country-label matching.
+    """
+    if "country" not in df.columns or df.empty:
+        return df
+
+    configured_inputs = (
+        inputs if inputs is not None else load_row_reconstruction_inputs()
+    )
+    if not configured_inputs:
+        return df
+
+    normalized_inputs = {
+        _normalize_country_label_series(pd.Series([value])).iat[0]
+        for value in configured_inputs
+    }
+    normalized_inputs.discard("")
+    if not normalized_inputs:
+        return df
+
+    country_text = (
+        df["country"].where(df["country"].notna(), "").astype(str).str.strip()
+    )
+    country_folded = _normalize_country_label_series(country_text)
+    previous_country = country_text.shift(1).fillna("").str.strip()
+    mask = country_folded.isin(normalized_inputs) & (previous_country != "")
+    if not mask.any():
+        return df
+
+    df = df.copy()
+    df.loc[mask, "country"] = (
+        previous_country.loc[mask] + " " + country_text.loc[mask]
+    )
+    return df
+
+
 def apply_country_label_patterns(
     df: pd.DataFrame, patterns_by_continent: CountryLabelPatterns | None = None
 ) -> pd.DataFrame:
@@ -699,6 +795,12 @@ def process_workbook(
     combined = uniquify_column_names(combined)
     combined = lowercase_original_country(combined)
     combined = replace_duplicate_country_totals(combined)
+    row_reconstruction_inputs = load_row_reconstruction_inputs(
+        str(country_label_patterns_path) if country_label_patterns_path else None
+    )
+    combined = reconstruct_rows_from_previous_country(
+        combined, row_reconstruction_inputs
+    )
     country_label_patterns = load_country_label_patterns(
         str(country_label_patterns_path) if country_label_patterns_path else None
     )
