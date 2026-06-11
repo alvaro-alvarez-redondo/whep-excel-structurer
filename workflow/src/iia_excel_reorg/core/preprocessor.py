@@ -34,7 +34,6 @@ _OCR_EXCLUDED_COLS = frozenset(
 _OCR_TO_1_RE = r"[|il/\\]"
 _OCR_TO_5_RE = r"s"
 _OCR_TO_0_RE = r"o"
-_OCR_TO_8_RE = r"b"
 _OCR_TO_6_RE = r"g"
 _OCR_TO_2_RE = r"z"
 
@@ -53,6 +52,19 @@ def _normalize_original_country_match_value(value: str) -> str:
 
 
 CountryLabelPatterns = dict[str, tuple[tuple[str, str], ...]]
+RowReconstructionPatterns = tuple[str, ...]
+
+
+def _is_enabled(value: object) -> bool:
+    """Return whether a configuration row is enabled."""
+    if pd.isna(value):
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().casefold()
+    return text not in {"", "0", "false", "f", "no", "n", "off", "disabled"}
 
 
 def _parse_variant_chars(value: object) -> str:
@@ -123,11 +135,69 @@ def _build_country_label_patterns(
     return {key: tuple(value) for key, value in grouped.items()}
 
 
+def _build_row_reconstruction_patterns(
+    letter_rows: tuple[tuple[object, object], ...],
+    row_inputs: tuple[object, ...],
+) -> RowReconstructionPatterns:
+    letter_substitutions = _normalize_letter_substitutions(letter_rows)
+    patterns: list[str] = []
+    seen: set[str] = set()
+
+    for canonical_input in row_inputs:
+        if pd.isna(canonical_input):
+            continue
+        text = str(canonical_input).strip()
+        normalized = _normalize_country_label_series(pd.Series([text])).iat[0]
+        if not text or not normalized or normalized in seen:
+            continue
+        patterns.append(_pattern_from_canonical_label(text, letter_substitutions))
+        seen.add(normalized)
+
+    return tuple(patterns)
+
+
 def _default_country_label_patterns() -> CountryLabelPatterns:
     return _build_country_label_patterns(
         DEFAULT_OCR_LETTER_SUBSTITUTIONS,
         DEFAULT_COUNTRY_LABEL_RULES,
     )
+
+
+def create_country_label_patterns_preset(path: str | Path) -> Path:
+    """Create the default country-label pattern workbook when it is missing.
+
+    The workbook is intended as the editable preprocessing input/preset file. It
+    includes the OCR letter dictionary, country-label rules, a row_reconstruction
+    sheet with example inputs, and a new row_addition sheet for adding rows.
+    Existing files are never overwritten.
+    """
+    output_path = Path(path)
+    if output_path.exists():
+        return output_path
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            DEFAULT_OCR_LETTER_SUBSTITUTIONS,
+            columns=["canonical_char", "variants"],
+        ).to_excel(writer, sheet_name="letter_dictionary", index=False)
+        pd.DataFrame(
+            DEFAULT_COUNTRY_LABEL_RULES,
+            columns=["continent", "canonical_input", "correct_output"],
+        ).assign(enabled=True).to_excel(
+            writer, sheet_name="country_patterns", index=False
+        )
+        pd.DataFrame(
+            DEFAULT_ROW_RECONSTRUCTION_INPUTS,
+            columns=["input", "enabled"],
+        ).to_excel(writer, sheet_name="row_reconstruction", index=False)
+        
+        # Add new row_addition sheet for row insertion functionality
+        pd.DataFrame(
+            columns=["country", "value", "enabled"],
+        ).to_excel(writer, sheet_name="row_addition", index=False)
+
+    return output_path
 
 
 def _country_label_patterns_from_excel(path: Path) -> CountryLabelPatterns:
@@ -139,7 +209,7 @@ def _country_label_patterns_from_excel(path: Path) -> CountryLabelPatterns:
     )
 
     if "enabled" in country_df.columns:
-        enabled = country_df["enabled"].fillna(True).astype(bool)
+        enabled = country_df["enabled"].map(_is_enabled)
         country_df = country_df.loc[enabled]
 
     country_rows = tuple(
@@ -159,6 +229,173 @@ def load_country_label_patterns(path: str | None = None) -> CountryLabelPatterns
     if not pattern_path.exists():
         return _default_country_label_patterns()
     return _country_label_patterns_from_excel(pattern_path)
+
+
+def _row_reconstruction_patterns_from_excel(path: Path) -> RowReconstructionPatterns:
+    """Load row-reconstruction regexes generated from canonical Excel inputs."""
+    try:
+        letter_df = pd.read_excel(path, sheet_name="letter_dictionary")
+        row_df = pd.read_excel(path, sheet_name="row_reconstruction")
+    except ValueError:
+        return ()
+
+    if "input" not in row_df.columns:
+        return ()
+
+    letter_rows = tuple(
+        letter_df[["canonical_char", "variants"]].itertuples(index=False, name=None)
+    )
+
+    if "enabled" in row_df.columns:
+        row_df = row_df.loc[row_df["enabled"].map(_is_enabled)]
+
+    row_inputs = tuple(row_df["input"].to_list())
+    return _build_row_reconstruction_patterns(letter_rows, row_inputs)
+
+
+@lru_cache(maxsize=8)
+def load_row_reconstruction_patterns(
+    path: str | None = None,
+) -> RowReconstructionPatterns:
+    """Load row-reconstruction regexes using the shared letter dictionary."""
+    pattern_path = (
+        Path(path) if path is not None else PREPROCESS_COUNTRY_LABEL_PATTERNS_PATH
+    )
+    if not pattern_path.exists():
+        return ()
+    return _row_reconstruction_patterns_from_excel(pattern_path)
+
+
+def load_row_reconstruction_inputs(
+    path: str | None = None,
+) -> RowReconstructionPatterns:
+    """Backward-compatible alias for row-reconstruction regex loading."""
+    return load_row_reconstruction_patterns(path)
+
+
+def _row_addition_from_excel(path: Path) -> list[tuple[str, str, bool]]:
+    """Load row addition rules from the row_addition sheet in the country patterns Excel file."""
+    try:
+        row_addition_df = pd.read_excel(path, sheet_name="row_addition")
+    except ValueError:
+        return []
+    
+    # Filter out rows where country or value is missing
+    if "country" not in row_addition_df.columns or "value" not in row_addition_df.columns:
+        return []
+    
+    # Process enabled flag
+    if "enabled" in row_addition_df.columns:
+        enabled = row_addition_df["enabled"].map(_is_enabled)
+        row_addition_df = row_addition_df.loc[enabled]
+    
+    # Convert to list of tuples (country, value)
+    rules = []
+    for _, row in row_addition_df.iterrows():
+        country = row.get("country", None)
+        value = row.get("value", None)
+        if pd.notna(country) and pd.notna(value):
+            rules.append((str(country), str(value)))
+    
+    return rules
+
+
+def process_row_additions(df: pd.DataFrame, row_addition_rules: list[tuple[str, str]]) -> pd.DataFrame:
+    """Process row additions based on the rules from row_addition sheet.
+    
+    For each rule (country, value):
+    1. Find rows where country matches
+    2. Insert a new row below each matching row
+    3. The new row contains only the value and copies the continent from the original row
+    """
+    if not row_addition_rules or "country" not in df.columns or "continent" not in df.columns:
+        return df
+    
+    df = df.copy()
+    
+    # Process each rule
+    for country_pattern, value in row_addition_rules:
+        # Normalize the country pattern for comparison
+        country_pattern_lower = country_pattern.strip().lower()
+        
+        # Find all rows that match this country pattern
+        matching_indices = []
+        for idx, row in df.iterrows():
+            if pd.notna(row.get("country")):
+                row_country = str(row["country"]).strip().lower()
+                # Check if the pattern is contained in the row country or vice versa
+                if country_pattern_lower in row_country or row_country in country_pattern_lower:
+                    matching_indices.append(idx)
+        
+        # Insert new rows below each matching row
+        # Process from bottom to top to preserve indices
+        for idx in reversed(matching_indices):
+            # Get the continent from the original row
+            original_continent = None
+            if idx < len(df):
+                original_continent = df.iloc[idx]["continent"]
+            
+            # Create new row with just the value and continent
+            new_row_data = {}
+            for col in df.columns:
+                if col == "country":
+                    new_row_data[col] = value
+                elif col == "continent":
+                    new_row_data[col] = original_continent
+                else:
+                    new_row_data[col] = None
+            
+            # Insert the new row
+            df = pd.concat([
+                df.iloc[:idx + 1],
+                pd.DataFrame([new_row_data]),
+                df.iloc[idx + 1:]
+            ], ignore_index=True)
+    
+    return df
+
+
+def deduplicate_added_rows(df: pd.DataFrame, row_addition_rules: list[tuple[str, str]]) -> pd.DataFrame:
+    """Remove exact duplicate rows that were added by the row addition feature.
+    
+    This deduplicates based on the specific combinations that could have been added
+    by the row_addition rules, preserving all unique records.
+    """
+    if not row_addition_rules or df.empty:
+        return df
+    
+    # Create a set of all possible added row combinations from rules
+    # We'll identify rows that match the pattern of what was added
+    df = df.copy()
+    
+    # Identify rows that were potentially added by row addition
+    # These are rows where the country column matches one of the "value" entries from rules
+    added_values = {value for _, value in row_addition_rules}
+    
+    # Find rows that might be duplicates (have country values that match added values)
+    potential_duplicates = df[df["country"].isin(added_values)].copy()
+    
+    if len(potential_duplicates) <= 1:
+        return df
+    
+    # Create a list of indices to drop (keeping first occurrence)
+    indices_to_drop = []
+    
+    # Compare rows to find exact duplicates
+    for i in range(len(potential_duplicates) - 1):
+        current_row = potential_duplicates.iloc[i]
+        next_row = potential_duplicates.iloc[i + 1]
+        
+        # Check if both rows are identical in all columns
+        if current_row.equals(next_row):
+            indices_to_drop.append(potential_duplicates.index[i + 1])
+    
+    # Remove the duplicate rows
+    if indices_to_drop:
+        df = df.drop(indices_to_drop).reset_index(drop=True)
+    
+    return df
+
 
 DEFAULT_OCR_LETTER_SUBSTITUTIONS = (
     ("a", "aeou"),
@@ -180,6 +417,12 @@ DEFAULT_COUNTRY_LABEL_RULES = (
     ("europe", "soviet zone", "Germany Soviet Zone"),
     ("europe", "soviet", "Germany Soviet Zone"),
     ("europe", "berlin", "Germany Berlin"),
+)
+
+DEFAULT_ROW_RECONSTRUCTION_INPUTS = (
+    ("dependent territories", True),
+    ("overseas territories", False),
+    ("protectorates", False),
 )
 
 
@@ -288,7 +531,6 @@ def apply_ocr_corrections(df: pd.DataFrame) -> pd.DataFrame:
             fixed = re.sub(_OCR_TO_1_RE, "1", fixed)
             fixed = re.sub(_OCR_TO_5_RE, "5", fixed)
             fixed = re.sub(_OCR_TO_0_RE, "0", fixed)
-            fixed = re.sub(_OCR_TO_8_RE, "8", fixed)
             fixed = re.sub(_OCR_TO_6_RE, "6", fixed)
             fixed = re.sub(_OCR_TO_2_RE, "2", fixed)
             new_names.append(fixed)
@@ -304,7 +546,6 @@ def apply_ocr_corrections(df: pd.DataFrame) -> pd.DataFrame:
             s = s.str.replace(_OCR_TO_1_RE, "1", regex=True)
             s = s.str.replace(_OCR_TO_5_RE, "5", regex=True)
             s = s.str.replace(_OCR_TO_0_RE, "0", regex=True)
-            s = s.str.replace(_OCR_TO_8_RE, "8", regex=True)
             s = s.str.replace(_OCR_TO_6_RE, "6", regex=True)
             s = s.str.replace(_OCR_TO_2_RE, "2", regex=True)
             df.iloc[:, idx] = s
@@ -516,6 +757,51 @@ def _prefix_countries_by_patterns(
     return df
 
 
+def reconstruct_rows_from_previous_country(
+    df: pd.DataFrame, patterns: RowReconstructionPatterns | None = None
+) -> pd.DataFrame:
+    """Prepend the exact previous country to rows matching configured inputs.
+
+    The ``row_reconstruction`` sheet supplies canonical input strings that are
+    converted to regexes with the same ``letter_dictionary`` used by
+    ``country_patterns``. When the current ``country`` value matches one of
+    those enabled inputs, the current value is replaced with
+    ``<previous country> <current country>``. Matching is accent-insensitive,
+    case-insensitive, whitespace-normalized, and treats OCR ``0`` as ``o`` in
+    the same way as country-label matching.
+    """
+    if "country" not in df.columns or df.empty:
+        return df
+
+    configured_patterns = (
+        patterns if patterns is not None else load_row_reconstruction_patterns()
+    )
+    if not configured_patterns:
+        return df
+
+    country_text = (
+        df["country"].where(df["country"].notna(), "").astype(str).str.strip()
+    )
+    country_folded = _normalize_country_label_series(country_text)
+    matches = pd.concat(
+        [
+            country_folded.str.fullmatch(pattern, na=False).rename(idx)
+            for idx, pattern in enumerate(configured_patterns)
+        ],
+        axis=1,
+    ).any(axis=1)
+    previous_country = country_text.shift(1).fillna("").str.strip()
+    mask = matches & (previous_country != "")
+    if not mask.any():
+        return df
+
+    df = df.copy()
+    df.loc[mask, "country"] = (
+        previous_country.loc[mask] + " " + country_text.loc[mask]
+    )
+    return df
+
+
 def apply_country_label_patterns(
     df: pd.DataFrame, patterns_by_continent: CountryLabelPatterns | None = None
 ) -> pd.DataFrame:
@@ -577,7 +863,12 @@ def lowercase_original_country(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def lowercase_text_values(df: pd.DataFrame) -> pd.DataFrame:
-    """Lowercase text values except in protected geography columns."""
+    """Lowercase text values except in protected geography columns.
+
+    Assignment is limited to cells that already contain strings so pandas string
+    extension columns containing only missing values keep their dtype-compatible
+    missing sentinel instead of receiving ``float("nan")`` values.
+    """
     text_column_positions = [
         idx
         for idx, col in enumerate(df.columns)
@@ -593,9 +884,10 @@ def lowercase_text_values(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     for idx in text_column_positions:
         series = df.iloc[:, idx]
-        df.iloc[:, idx] = series.map(
-            lambda value: value.lower() if isinstance(value, str) else value
-        )
+        string_mask = series.map(lambda value: isinstance(value, str))
+        if not string_mask.any():
+            continue
+        df.iloc[string_mask.to_numpy(), idx] = series.loc[string_mask].str.lower()
     return df
 
 
@@ -634,6 +926,8 @@ def normalize_region_totals(df: pd.DataFrame) -> pd.DataFrame:
     )
     folded = original.map(_normalize_original_country_match_value)
     target_set = {
+        "western europe",
+        "eastern europe",
         "north america",
         "latin america",
         "lacin america",
@@ -645,6 +939,8 @@ def normalize_region_totals(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     continent_map = {
+        "western europe": "EUROPE",
+        "eastern europe": "EUROPE",
         "north america": "AMERICA",
         "latin america": "AMERICA",
         "lacin america": "AMERICA",
@@ -683,7 +979,8 @@ def process_workbook(
         6. Deduplicate repeated metadata columns.
         7. Reinsert placeholder columns.
         8. Remove the ``original_country`` helper column.
-        9. Write a single sheet named ``data``.
+        9. Process row additions from the row_addition sheet.
+        10. Write a single sheet named ``data``.
     """
     sheets = _read_all_sheets(input_path)
 
@@ -699,6 +996,12 @@ def process_workbook(
     combined = uniquify_column_names(combined)
     combined = lowercase_original_country(combined)
     combined = replace_duplicate_country_totals(combined)
+    row_reconstruction_patterns = load_row_reconstruction_patterns(
+        str(country_label_patterns_path) if country_label_patterns_path else None
+    )
+    combined = reconstruct_rows_from_previous_country(
+        combined, row_reconstruction_patterns
+    )
     country_label_patterns = load_country_label_patterns(
         str(country_label_patterns_path) if country_label_patterns_path else None
     )
@@ -707,6 +1010,14 @@ def process_workbook(
     combined = replace_ampersands_in_columns(combined, ("continent", "country"))
     combined = lowercase_text_values(combined)
     combined = insert_blank_rows_before_continents(combined)
+    
+    # Process row additions from the row_addition sheet
+    if country_label_patterns_path:
+        row_addition_rules = _row_addition_from_excel(country_label_patterns_path)
+        combined = process_row_additions(combined, row_addition_rules)
+        # Deduplicate rows added by the row addition feature
+        combined = deduplicate_added_rows(combined, row_addition_rules)
+    
     combined = remove_original_country_column(combined)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

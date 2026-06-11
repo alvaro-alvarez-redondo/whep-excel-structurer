@@ -11,7 +11,7 @@ from collections import deque
 from pathlib import Path
 from typing import Callable, TypeAlias
 
-from .core.preprocessor import process_workbook
+from .core.preprocessor import create_country_label_patterns_preset, process_workbook
 from .paths import (
     PREPROCESS_COUNTRY_LABEL_PATTERNS_PATH,
     PREPROCESS_INPUT_DIR,
@@ -54,9 +54,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--country-label-patterns",
         default=str(PREPROCESS_COUNTRY_LABEL_PATTERNS_PATH),
         help=(
-            "Excel workbook with letter_dictionary and country_patterns sheets. "
-            "Defaults to data/preprocess/country_label_patterns.xlsx."
+            "Excel workbook with letter_dictionary, country_patterns, and "
+            "row_reconstruction sheets. Created with preset examples if missing. "
+            f"Defaults to {PREPROCESS_COUNTRY_LABEL_PATTERNS_PATH}."
         ),
+    )
+    parser.add_argument(
+        "--show-tracebacks",
+        action="store_true",
+        help="Print full Python tracebacks for workbook processing errors.",
     )
     return parser
 
@@ -133,7 +139,12 @@ def _prepare_entry(entry: WorkbookEntry) -> None:
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _process_entry(entry: WorkbookEntry, country_label_patterns_path: Path) -> None:
+def _process_entry(
+    entry: WorkbookEntry,
+    country_label_patterns_path: Path,
+    *,
+    show_traceback: bool = False,
+) -> None:
     """Process a single workbook and write it to the target path."""
     source_path, target_path = entry
     try:
@@ -142,9 +153,10 @@ def _process_entry(entry: WorkbookEntry, country_label_patterns_path: Path) -> N
             target_path,
             country_label_patterns_path=country_label_patterns_path,
         )
-    except Exception:
-        print(f"\nError processing {source_path}:")
-        traceback.print_exc()
+    except Exception as exc:
+        print(f"\nError processing {source_path}: {type(exc).__name__}: {exc}")
+        if show_traceback:
+            traceback.print_exc()
 
 
 def main() -> None:
@@ -156,6 +168,9 @@ def main() -> None:
     output_root = Path(args.output_dir)
     country_label_patterns_path = Path(args.country_label_patterns)
     _ensure_workspace(input_path, output_root)
+    country_label_patterns_path = create_country_label_patterns_preset(
+        country_label_patterns_path
+    )
 
     if input_path.is_file():
         workbook_entries: list[WorkbookEntry] = [
@@ -176,7 +191,11 @@ def main() -> None:
     _run_progress(
         "Preparing excels",
         workbook_entries,
-        lambda entry: _process_entry(entry, country_label_patterns_path),
+        lambda entry: _process_entry(
+            entry,
+            country_label_patterns_path,
+            show_traceback=args.show_tracebacks,
+        ),
     )
 
     elapsed = time.perf_counter() - start_time
