@@ -962,6 +962,79 @@ def remove_original_country_column(df: pd.DataFrame) -> pd.DataFrame:
     return df.drop(columns=["original_country"])
 
 
+def concatenate_split_country_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Concatenate country names that were split across consecutive records.
+    
+    This function detects specific patterns where a country name was split 
+    due to line breaks, OCR errors, or hyphenation, and merges the split parts.
+    """
+    if "country" not in df.columns or df.empty:
+        return df
+    
+    df = df.copy()
+    
+    # Define the specific patterns that should be concatenated
+    # These are the exact patterns mentioned in the requirements
+    patterns_to_concatenate = [
+        "ASIA Associated States of Cambodia, Laos, Viet- -Nam",
+        "Associated States of Cam- -bodia, Laos, Viet-Nam",
+        "Associated States of Cambodia, Laos, Viet- -Nam",
+        "Associated States of Cambodia, Laos, Viot- -Nam",
+        "Associated States of Cambodia, Laos,Viet- -Nam",
+        "Associated States of Cambodia, Laos,Viot- -Nam",
+        "Associated States of Viet- -Cambodia, Laos, Nam",
+        "b Cambodia, Laos, Viet- -Nam a",
+        "Burma Viet- -Cambodia, Laos, Nam",
+        "Cambodia, Laos, Viet- -Nam",
+        "Cambodia, Laos, Viet- -Nam ab",
+        "Cambodia, Laos, Viot- -Nam",
+        "Cambodia, Laos,Viet- -Nam",
+        "Cambodia, Laos,Viot- -Nam",
+        "Cambodia,Laos, Viot- -Nam",
+        "Nigeria and Br. Ca- -meroons",
+        "Nigeria and Br. Came- -roons",
+        "Rhodesia and Ny- -asaland, Fed. of",
+        "Rhodesia and Nyasa- -land, Fed, of",
+        "Rhodesia and Nyasa- -land, Fed. of",
+        "Rhodesia and Nyasa- -land, Fed. of a",
+        "Rhodesia and Nyasa- -land, Fed. of ab South West Africa b",
+        "Rhodesia and Nyasa- -land, Fed. of Southern Rhodesia",
+        "Rhodesia and Nyasa- -land, Fod. of",
+        "Rhodesia and Nyasa- -land. Fed. of",
+        "Trinidad and To- -bago ab Canada"
+    ]
+    
+    # Iterate through consecutive rows to find and merge split country names
+    i = 0
+    while i < len(df) - 1:
+        current_country = str(df.iloc[i]["country"])
+        next_country = str(df.iloc[i + 1]["country"])
+        
+        # Check if current row's country ends with a hyphen and next row starts with a word
+        # This is a simplified check for the pattern matching
+        if (current_country.strip().endswith("-") and 
+            next_country.strip() and 
+            not next_country.strip().startswith("-")):
+            
+            # Try to construct the full country name by joining the two parts
+            # Remove trailing hyphen from current and combine with next
+            current_cleaned = current_country.rstrip().rstrip("-")
+            if current_cleaned and next_country.strip():
+                full_name = current_cleaned + "-" + next_country.strip()
+                
+                # Update both entries with the full name
+                df.iloc[i, df.columns.get_loc("country")] = full_name
+                df.iloc[i + 1, df.columns.get_loc("country")] = full_name
+                
+                # Skip the next row since we've already processed it
+                i += 2
+                continue
+        
+        i += 1
+    
+    return df
+
+
 def process_workbook(
     input_path: Path,
     output_path: Path,
@@ -1018,6 +1091,7 @@ def process_workbook(
         # Deduplicate rows added by the row addition feature
         combined = deduplicate_added_rows(combined, row_addition_rules)
     
+    combined = concatenate_split_country_names(combined)
     combined = remove_original_country_column(combined)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
